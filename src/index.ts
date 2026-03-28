@@ -107,10 +107,19 @@ app.post("/webhook", async (c) => {
 					opencodeSessionId = existing.opencodeSessionId;
 				}
 
+				let activeAgent = agent;
+				let returnAgent: string | undefined;
+
+				if (command?.type === "start-work") {
+					returnAgent = agent;
+					activeAgent = config.executorAgent;
+				}
+
 				const now = new Date().toISOString();
 				const mapping: SessionMapping = {
 					opencodeSessionId,
-					activeAgent: agent,
+					activeAgent,
+					returnAgent,
 					linearAgentSessionId: linearSessionId,
 					createdAt: existing?.createdAt ?? now,
 					updatedAt: now,
@@ -128,14 +137,14 @@ app.post("/webhook", async (c) => {
 				}
 
 				if (command?.type === "start-work" && command.planPath) {
-					prompt += `\nPlease start working on this issue. Follow the plan at: ${command.planPath}`;
+					prompt += `\n/start-work ${command.planPath}`;
 				} else if (command?.type === "start-work") {
-					prompt += "\nPlease start working on this issue.";
+					prompt += "\n/start-work";
 				} else {
 					prompt += "\nPlease analyze this issue and provide your initial plan and response.";
 				}
 
-				const response = await opencode.sendMessage(opencodeSessionId, prompt, agent);
+				const response = await opencode.sendMessage(opencodeSessionId, prompt, activeAgent);
 				const parsed = parseOpenCodeResponse(response);
 
 				if (parsed.plan) {
@@ -194,6 +203,7 @@ app.post("/webhook", async (c) => {
 				const existing = await sessionStore.get(issueId);
 				let opencodeSessionId: string;
 				let activeAgent = agent;
+				let returnAgent: string | undefined;
 
 				if (!existing) {
 					const issue = payload.agentSession.issue;
@@ -202,21 +212,45 @@ app.post("/webhook", async (c) => {
 					opencodeSessionId = created.id;
 				} else {
 					opencodeSessionId = existing.opencodeSessionId;
-					activeAgent = command?.type === "switch-agent" ? agent : existing.activeAgent;
+
+					if (command?.type === "switch-agent") {
+						activeAgent = agent;
+					} else if (command?.type === "start-work") {
+						returnAgent = existing.activeAgent;
+						activeAgent = config.executorAgent;
+					} else {
+						activeAgent = existing.activeAgent;
+						returnAgent = existing.returnAgent;
+					}
 				}
 
 				const now = new Date().toISOString();
 				await sessionStore.set(issueId, {
 					opencodeSessionId,
 					activeAgent,
+					returnAgent,
 					linearAgentSessionId: linearSessionId,
 					createdAt: existing?.createdAt ?? now,
 					updatedAt: now,
 				});
 
-				const userMessage = commentBody || "Please continue with the current task.";
+				let userMessage = commentBody || "Please continue with the current task.";
+				if (command?.type === "start-work") {
+					userMessage = command.planPath ? `/start-work ${command.planPath}` : "/start-work";
+				}
+
 				const response = await opencode.sendMessage(opencodeSessionId, userMessage, activeAgent);
 				const parsed = parseOpenCodeResponse(response);
+
+				if (returnAgent && activeAgent === config.executorAgent) {
+					await sessionStore.set(issueId, {
+						opencodeSessionId,
+						activeAgent: returnAgent,
+						linearAgentSessionId: linearSessionId,
+						createdAt: existing?.createdAt ?? now,
+						updatedAt: now,
+					});
+				}
 
 				if (parsed.plan) {
 					await linearActivities.updatePlan(linearSessionId, parsed.plan);

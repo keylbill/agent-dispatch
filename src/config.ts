@@ -10,6 +10,12 @@ function optionalEnv(name: string, defaultValue: string): string {
 	return process.env[name] ?? defaultValue;
 }
 
+export interface AppConfig {
+	clientId: string;
+	clientSecret: string;
+	defaultAgent: string;
+}
+
 export interface Config {
 	linearClientId: string;
 	linearClientSecret: string;
@@ -21,6 +27,18 @@ export interface Config {
 	opencodePassword: string | undefined;
 	defaultAgent: string;
 	sessionStorePath: string;
+	apps: Record<string, AppConfig>;
+	executorAgent: string;
+}
+
+function parseApps(): Record<string, AppConfig> {
+	const raw = process.env.AGENT_APPS;
+	if (!raw) return {};
+	try {
+		return JSON.parse(raw) as Record<string, AppConfig>;
+	} catch {
+		return {};
+	}
 }
 
 function loadConfig(): Config {
@@ -35,6 +53,8 @@ function loadConfig(): Config {
 		opencodePassword: process.env.OPENCODE_PASSWORD || undefined,
 		defaultAgent: optionalEnv("DEFAULT_AGENT", "Sisyphus (Ultraworker)"),
 		sessionStorePath: optionalEnv("SESSION_STORE_PATH", "./data/sessions.json"),
+		apps: parseApps(),
+		executorAgent: optionalEnv("EXECUTOR_AGENT", "Atlas (Plan Executor)"),
 	};
 }
 
@@ -51,6 +71,8 @@ export function logConfig(cfg: Config): void {
 		host: cfg.host,
 		opencodePassword: cfg.opencodePassword ? "[redacted]" : undefined,
 		defaultAgent: cfg.defaultAgent,
+		executorAgent: cfg.executorAgent,
+		apps: Object.keys(cfg.apps).length > 0 ? cfg.apps : "none (single-app mode)",
 		sessionStorePath: cfg.sessionStorePath,
 	});
 }

@@ -126,6 +126,14 @@ export async function fetchIssueLabels(
 	}
 }
 
+function agentFromApp(oauthClientId: string): string | null {
+	const appConfig = config.apps[oauthClientId];
+	if (appConfig) {
+		return resolveAgentName(appConfig.defaultAgent);
+	}
+	return null;
+}
+
 export function routeAgentSession(
 	payload: AgentSessionWebhookPayload,
 	labels?: Array<{ name: string }>,
@@ -143,13 +151,16 @@ export function routeAgentSession(
 	const issueLabels = issue?.labels ?? labels ?? null;
 	const labelAgent = agentFromLabels(issueLabels);
 	const commandAgent = command?.type === "switch-agent" ? command.agent : null;
+	const appAgent = agentFromApp(payload.oauthClientId);
 
 	let agent = config.defaultAgent;
 
-	if (labelAgent) {
-		agent = labelAgent;
-	} else if (commandAgent) {
+	if (commandAgent) {
 		agent = commandAgent;
+	} else if (labelAgent) {
+		agent = labelAgent;
+	} else if (appAgent) {
+		agent = appAgent;
 	} else if (commentBody) {
 		const inlineMatch = commentBody.match(/\/agent\s+(\S+)/i);
 		if (inlineMatch) {

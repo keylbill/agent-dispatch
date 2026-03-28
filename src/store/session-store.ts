@@ -5,6 +5,7 @@ import { config } from "../config.js";
 export interface SessionMapping {
 	opencodeSessionId: string;
 	activeAgent: string;
+	returnAgent?: string;
 	linearAgentSessionId: string;
 	createdAt: string;
 	updatedAt: string;
