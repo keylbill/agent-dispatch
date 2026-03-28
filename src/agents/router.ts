@@ -84,15 +84,52 @@ export function parseCommand(text: string): ParsedCommand | null {
 function agentFromLabels(labels?: Array<{ name: string }> | null): string | null {
 	if (!labels) return null;
 	for (const label of labels) {
-		const match = label.name.match(/^agent:(.+)$/i);
-		if (match) {
-			return match[1].toLowerCase();
+		const prefixed = label.name.match(/^agent:(.+)$/i);
+		if (prefixed) {
+			return prefixed[1].toLowerCase();
+		}
+
+		const lower = label.name.toLowerCase();
+		if (lower in agentAliases) {
+			return lower;
 		}
 	}
 	return null;
 }
 
-export function routeAgentSession(payload: AgentSessionWebhookPayload): AgentRouting {
+export interface IssueLabels {
+	labels: Array<{ name: string }>;
+}
+
+export async function fetchIssueLabels(
+	issueId: string,
+	accessToken: string,
+): Promise<Array<{ name: string }>> {
+	try {
+		const resp = await fetch("https://api.linear.app/graphql", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				query: `{ issue(id: "${issueId}") { labels { nodes { name } } } }`,
+			}),
+		});
+		if (!resp.ok) return [];
+		const data = (await resp.json()) as Record<string, unknown>;
+		const issue = (data as { data?: { issue?: { labels?: { nodes?: Array<{ name: string }> } } } })
+			.data?.issue;
+		return issue?.labels?.nodes ?? [];
+	} catch {
+		return [];
+	}
+}
+
+export function routeAgentSession(
+	payload: AgentSessionWebhookPayload,
+	labels?: Array<{ name: string }>,
+): AgentRouting {
 	const session = payload.agentSession;
 	const issue = session.issue;
 
@@ -103,7 +140,8 @@ export function routeAgentSession(payload: AgentSessionWebhookPayload): AgentRou
 
 	const command = commentBody ? parseCommand(commentBody) : null;
 
-	const labelAgent = agentFromLabels(issue?.labels);
+	const issueLabels = issue?.labels ?? labels ?? null;
+	const labelAgent = agentFromLabels(issueLabels);
 	const commandAgent = command?.type === "switch-agent" ? command.agent : null;
 
 	let agent = config.defaultAgent;

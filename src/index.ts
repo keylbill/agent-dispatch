@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { loadAgentAliases, routeAgentSession } from "./agents/router.js";
+import { fetchIssueLabels, loadAgentAliases, routeAgentSession } from "./agents/router.js";
 import { config, logConfig } from "./config.js";
 import { LinearActivities } from "./linear/activities.js";
 import { handleOAuthAuthorize, handleOAuthCallback, storeToken } from "./linear/oauth.js";
@@ -88,8 +88,11 @@ app.post("/webhook", async (c) => {
 
 	const handleAsync = async () => {
 		try {
+			const issueId = payload.agentSession.issue?.id;
+			const labels = issueId ? await fetchIssueLabels(issueId, tokenData.access_token) : [];
+
 			if (payload.action === "created") {
-				const routing = routeAgentSession(payload);
+				const routing = routeAgentSession(payload, labels);
 				const { issueId, agent, command } = routing;
 
 				const existing = await sessionStore.get(issueId);
@@ -158,7 +161,7 @@ app.post("/webhook", async (c) => {
 					}
 				}
 			} else if (payload.action === "prompted") {
-				const routing = routeAgentSession(payload);
+				const routing = routeAgentSession(payload, labels);
 				const { issueId, agent, command } = routing;
 				const commentBody =
 					payload.agentSession.comment?.body ?? payload.agentSession.promptContext?.body ?? "";
@@ -199,7 +202,7 @@ app.post("/webhook", async (c) => {
 					opencodeSessionId = created.id;
 				} else {
 					opencodeSessionId = existing.opencodeSessionId;
-					activeAgent = command?.type === "switch-agent" ? command.agent : existing.activeAgent;
+					activeAgent = command?.type === "switch-agent" ? agent : existing.activeAgent;
 				}
 
 				const now = new Date().toISOString();
