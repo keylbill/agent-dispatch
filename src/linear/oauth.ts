@@ -35,14 +35,19 @@ function writeTokenStore(store: TokenStore): void {
 	writeFileSync(TOKEN_STORE_PATH, JSON.stringify(store, null, 2), "utf-8");
 }
 
-export function getStoredToken(organizationId: string): TokenData | null {
+export function getStoredToken(key: string): TokenData | null {
 	const store = readTokenStore();
-	return store[organizationId] ?? store.default ?? null;
+	return store[key] ?? store.default ?? null;
 }
 
-export function storeToken(organizationId: string, data: TokenData): void {
+export function getTokenForApp(oauthClientId: string, organizationId: string): TokenData | null {
 	const store = readTokenStore();
-	store[organizationId] = data;
+	return store[`app:${oauthClientId}`] ?? store[organizationId] ?? store.default ?? null;
+}
+
+export function storeToken(key: string, data: TokenData): void {
+	const store = readTokenStore();
+	store[key] = data;
 	writeTokenStore(store);
 }
 

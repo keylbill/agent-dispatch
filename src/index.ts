@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import { fetchIssueLabels, loadAgentAliases, routeAgentSession } from "./agents/router.js";
-import { config, logConfig } from "./config.js";
+import { config, getAllWebhookSecrets, getAppByClientId, logConfig } from "./config.js";
 import { LinearActivities } from "./linear/activities.js";
-import { handleOAuthAuthorize, handleOAuthCallback, storeToken } from "./linear/oauth.js";
-import { getStoredToken } from "./linear/oauth.js";
-import { parseWebhookPayload, verifyWebhookSignature } from "./linear/webhook.js";
+import {
+	getTokenForApp,
+	handleOAuthAuthorize,
+	handleOAuthCallback,
+	storeToken,
+} from "./linear/oauth.js";
+import { parseWebhookPayload, verifyWebhookSignatureMulti } from "./linear/webhook.js";
 import { OpenCodeClient } from "./opencode/client.js";
 import { parseOpenCodeResponse } from "./opencode/output-parser.js";
 import { type SessionMapping, SessionStore } from "./store/session-store.js";
@@ -13,7 +17,23 @@ const app = new Hono();
 const sessionStore = new SessionStore();
 
 app.get("/", (c) => {
-	return c.json({ status: "ok", service: "agent-dispatch" });
+	return c.json({
+		status: "ok",
+		service: "agent-dispatch",
+		apps: Object.entries(config.apps).map(([id, a]) => ({ agent: a.defaultAgent, clientId: id })),
+	});
+});
+
+app.get("/oauth/authorize/:appName", (c) => {
+	const appName = c.req.param("appName");
+	const appEntry = Object.values(config.apps).find(
+		(a) => a.defaultAgent.toLowerCase() === appName.toLowerCase(),
+	);
+	if (!appEntry) {
+		return c.json({ error: `Unknown app: ${appName}. Check AGENT_APPS config.` }, 404);
+	}
+	const redirectUri = new URL("/oauth/callback", config.publicUrl).toString();
+	return handleOAuthAuthorize(appEntry.clientId, redirectUri);
 });
 
 app.get("/oauth/authorize", (c) => {
@@ -23,7 +43,6 @@ app.get("/oauth/authorize", (c) => {
 
 app.get("/oauth/callback", async (c) => {
 	const code = c.req.query("code");
-	const orgId = c.req.query("state") ?? "default";
 
 	if (!code) {
 		return c.json({ error: "Missing code parameter" }, 400);
@@ -31,23 +50,42 @@ app.get("/oauth/callback", async (c) => {
 
 	const redirectUri = new URL("/oauth/callback", config.publicUrl).toString();
 
-	const tokenData = await handleOAuthCallback(
-		code,
-		config.linearClientId,
-		config.linearClientSecret,
-		redirectUri,
-	);
+	for (const [clientId, appCfg] of Object.entries(config.apps)) {
+		const tokenData = await handleOAuthCallback(
+			code,
+			appCfg.clientId,
+			appCfg.clientSecret,
+			redirectUri,
+		).catch(() => null);
+		if (tokenData) {
+			storeToken(`app:${clientId}`, tokenData);
+			return c.json({
+				status: "ok",
+				message: `OAuth complete for ${appCfg.defaultAgent}. Token stored.`,
+			});
+		}
+	}
 
-	storeToken(orgId, tokenData);
-
-	return c.json({ status: "ok", message: "OAuth complete. Token stored." });
+	try {
+		const tokenData = await handleOAuthCallback(
+			code,
+			config.linearClientId,
+			config.linearClientSecret,
+			redirectUri,
+		);
+		storeToken("default", tokenData);
+		return c.json({ status: "ok", message: "OAuth complete. Token stored." });
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return c.json({ error: message }, 400);
+	}
 });
 
 app.post("/webhook", async (c) => {
 	const rawBody = await c.req.text();
 	const signature = c.req.header("Linear-Signature") ?? "";
 
-	if (!verifyWebhookSignature(rawBody, signature, config.linearWebhookSecret)) {
+	if (!verifyWebhookSignatureMulti(rawBody, signature, getAllWebhookSecrets())) {
 		return c.json({ error: "Invalid signature" }, 401);
 	}
 
@@ -67,10 +105,10 @@ app.post("/webhook", async (c) => {
 		return c.json({ status: "ignored" });
 	}
 
-	const tokenData = getStoredToken(payload.organizationId);
+	const tokenData = getTokenForApp(payload.oauthClientId, payload.organizationId);
 	if (!tokenData) {
-		console.error(`No token stored for organization: ${payload.organizationId}`);
-		return c.json({ error: "No access token for this organization" }, 403);
+		console.error(`No token for app ${payload.oauthClientId} / org ${payload.organizationId}`);
+		return c.json({ error: "No access token for this app/organization" }, 403);
 	}
 
 	const linearActivities = new LinearActivities(tokenData.access_token);

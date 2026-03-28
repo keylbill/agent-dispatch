@@ -226,19 +226,38 @@ Cloud Run is stateless and scales to zero. OpenCode needs a persistent environme
 
 The bridge itself can run anywhere. It only needs to reach the OpenCode server URL.
 
+## Multi-App Mode
+
+Register separate Linear OAuth apps so each agent appears as its own assignable user (e.g. `@Prometheus`, `@Sisyphus`).
+
+1. Create one OAuth app per agent in [Linear Settings > API > Applications](https://linear.app/settings/api/applications/new)
+2. All apps use the same redirect URI and webhook URL (the bridge handles routing)
+3. Enable **Agent session events** on each app
+4. Configure `AGENT_APPS` in `.env` with a JSON mapping:
+
+```bash
+AGENT_APPS={"<prometheus_client_id>":{"clientId":"<prometheus_client_id>","clientSecret":"<secret>","webhookSecret":"<wh_secret>","defaultAgent":"prometheus"},"<sisyphus_client_id>":{"clientId":"<sisyphus_client_id>","clientSecret":"<secret>","webhookSecret":"<wh_secret>","defaultAgent":"sisyphus"}}
+```
+
+5. Authorize each app: visit `/oauth/authorize/prometheus` and `/oauth/authorize/sisyphus`
+
+The `/start-work` command automatically hands off to the executor agent (Atlas by default) and returns to the previous agent when done. Atlas is never exposed as an assignable user.
+
 ## Configuration Reference
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `LINEAR_CLIENT_ID` | Yes | — | OAuth client ID from Linear app |
-| `LINEAR_CLIENT_SECRET` | Yes | — | OAuth client secret from Linear app |
-| `LINEAR_WEBHOOK_SECRET` | Yes | — | Webhook secret for signature verification |
+| `LINEAR_CLIENT_ID` | Yes | — | Fallback OAuth client ID (single-app mode) |
+| `LINEAR_CLIENT_SECRET` | Yes | — | Fallback OAuth client secret |
+| `LINEAR_WEBHOOK_SECRET` | Yes | — | Fallback webhook secret for signature verification |
 | `OPENCODE_URL` | Yes | — | URL of the OpenCode server |
 | `OPENCODE_PASSWORD` | No | — | Password for OpenCode server authentication |
 | `PORT` | No | `3001` | Port the bridge listens on |
 | `HOST` | No | `0.0.0.0` | Host to bind |
 | `PUBLIC_URL` | No | `http://localhost:PORT` | Public URL for OAuth callbacks |
-| `DEFAULT_AGENT` | No | `Sisyphus (Ultraworker)` | Agent to use when not specified |
+| `DEFAULT_AGENT` | No | `Sisyphus (Ultraworker)` | Agent when no app/label/command specifies one |
+| `EXECUTOR_AGENT` | No | `Atlas (Plan Executor)` | Hidden agent for `/start-work` execution |
+| `AGENT_APPS` | No | `{}` | JSON mapping of OAuth client IDs to app configs |
 | `SESSION_STORE_PATH` | No | `./data/sessions.json` | Path to session mapping file |
 
 ## Development

@@ -8,6 +8,14 @@ export function verifyWebhookSignature(body: string, signature: string, secret: 
 	return computed === signature;
 }
 
+export function verifyWebhookSignatureMulti(
+	body: string,
+	signature: string,
+	secrets: string[],
+): boolean {
+	return secrets.some((s) => verifyWebhookSignature(body, signature, s));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

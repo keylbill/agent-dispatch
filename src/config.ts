@@ -13,6 +13,7 @@ function optionalEnv(name: string, defaultValue: string): string {
 export interface AppConfig {
 	clientId: string;
 	clientSecret: string;
+	webhookSecret: string;
 	defaultAgent: string;
 }
 
@@ -59,6 +60,20 @@ function loadConfig(): Config {
 }
 
 export const config: Config = loadConfig();
+
+export function getAppByClientId(clientId: string): AppConfig | null {
+	return config.apps[clientId] ?? null;
+}
+
+export function getAllWebhookSecrets(): string[] {
+	const secrets = [config.linearWebhookSecret];
+	for (const app of Object.values(config.apps)) {
+		if (app.webhookSecret && !secrets.includes(app.webhookSecret)) {
+			secrets.push(app.webhookSecret);
+		}
+	}
+	return secrets;
+}
 
 export function logConfig(cfg: Config): void {
 	console.log("Config loaded:", {
